@@ -1,0 +1,122 @@
+library(data.table)
+
+# input directory 
+input_file <- "/data/circ_ukb/AHua/project/GWAS/regenie/metaanalysis/X7_SurfaceVolumeRatio_all_metal1.txt"
+output_file <- "/data/circ_ukb/AHua/project/FUMA/X7_SurfaceVolumeRatio_FUMA_ready_1.txt"
+
+# read the date
+df <- fread(input_file)
+
+# clear NA
+df <- df[complete.cases(df), ]
+
+# keep standard SNP
+valid_alleles <- c("A", "C", "G", "T", "a", "c", "g", "t")
+df <- df[df$Allele1 %in% valid_alleles & df$Allele2 %in% valid_alleles, ]
+
+# capitalize
+df$A1 <- toupper(df$Allele1)
+df$A2 <- toupper(df$Allele2)
+
+# extract CHR 和 POS（BP）from MarkerName ，e.g. chr4:12345678
+df[, CHR := toupper(sub("^chr", "", tstrsplit(MarkerName, ":", fixed=TRUE)[[1]]))]
+df[, BP := as.integer(tstrsplit(MarkerName, ":", fixed=TRUE)[[2]])]
+
+# only keep 1–22 和 X chr
+df <- df[CHR %in% c(as.character(1:22), "X","Y")]
+
+# build FUMA format
+df_fuma <- data.frame(
+  SNP = df$MarkerName,
+  CHR = df$CHR,
+  POS = df$BP,
+  A1 = df$A1,
+  A2 = df$A2,
+  P = df$`P-value`,
+  BETA = df$Effect,
+  SE = df$StdErr,
+  N = df$TotalSampleSize
+)
+
+
+
+# ensure P is numeric（注意拼写错误 df_fumaf → df_fuma）
+df_fuma$P <- as.numeric(df_fuma$P)
+
+# group
+library(data.table)
+setDT(df_fuma)  
+
+df_sig <- df_fuma[P < 0.05]
+df_nonsig <- df_fuma[P >= 0.05]
+
+# randomly sample 30% insig  SNP
+set.seed(42)  
+df_nonsig_sampled <- df_nonsig[sample(.N, size = floor(0.3 * .N))]
+
+# 
+df_combined <- rbind(df_sig, df_nonsig_sampled)
+
+# 转换为 BED 格式（0-based）
+df <- copy(df_combined)
+df$CHR <- gsub("chr", "", df$CHR)                   
+df$start <- as.integer(df$POS) - 1                   
+df$end <- as.integer(df$POS)
+df$CHR <- paste0("chr", df$CHR)                     
+
+# build bed, CHR, start, end
+df_bed <- df[, .(CHR, start, end)]
+
+# no scientific 
+df_bed[, start := format(start, scientific = FALSE)]
+df_bed[, end := format(end, scientific = FALSE)]
+
+# BED file
+fwrite(df_bed, "/data/circ_ukb/AHua/project/FUMA/X7_SurfaceVolumeRatio.bed", sep = "\t", col.names = FALSE)
+
+
+
+
+
+
+# Step 1: read original GWAS file（hg38 ）
+gwas <- df_combined
+
+# match key：chr:bp
+gwas[, SNP_key := paste0("chr", CHR, ":", POS)]
+
+# Step 2: read liftover  BED file（hg19 ）
+# 格式是 chr, start (0-based), end (1-based)
+
+
+# LiftOver （chr, start, end, SNP_key, status）
+lifted <- fread("/data/circ_ukb/AHua/project/FUMA/X7_SurfaceVolumeRatio_changed.bed", 
+                col.names = c("chr", "start", "end", "SNP_key", "status"))
+
+
+
+lifted[, match_key := tstrsplit(SNP_key, "-", fixed = TRUE)[[1]]]
+head(lifted$match_key)
+
+
+merged <- merge(
+  gwas,
+  lifted[, .(match_key, new_chr = chr, new_pos = end)],
+  by.x = "SNP_key", by.y = "match_key",
+  all.x = FALSE
+)
+
+# update position
+merged[, CHR := gsub("chr", "", new_chr)]
+merged[, POS := new_pos]
+merged[, c("new_chr", "new_pos") := NULL]
+
+
+# check results
+head(merged)
+nrow(merged)
+
+
+
+fwrite(merged, "/data/circ_ukb/AHua/project/FUMA/X7_SurfaceVolumeRatio_fuma_ready_hg19.txt", sep = "\t", quote = FALSE)
+R.utils::gzip("/data/circ_ukb/AHua/project/FUMA/X7_SurfaceVolumeRatio_fuma_ready_hg19.txt", overwrite = TRUE)
