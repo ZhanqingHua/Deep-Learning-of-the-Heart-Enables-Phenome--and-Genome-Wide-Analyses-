@@ -1,0 +1,113 @@
+#pre-preocess the file
+
+library(tidyverse)
+library(data.table)
+
+
+df1 <- fread("/data/circ_ukb/AHua/project/correlation_test/heart_merged_data.csv")
+df2 <- read.csv("/data/circ_ukb/AHua/project/correlation_test/Height_EMPI_avg.csv", 
+                header = TRUE,
+                stringsAsFactors = FALSE)
+
+
+merged <- merge(df1, df2, by = "EMPI", all.x = TRUE)
+
+
+
+fwrite(merged, "/data/circ_ukb/AHua/project/correlation_test/heart_Height_merged.tsv ")
+
+
+
+
+
+
+data <- read.csv("/data/circ_ukb/AHua/project/correlation_test/aortic_Height_merged.tsv", check.names = FALSE)
+
+library(ggplot2)
+library(reshape2)
+
+
+# define partial correlation function
+partial_corr <- function(x, y, z, method = "pearson") {
+  res_x <- resid(lm(x ~ z))
+  res_y <- resid(lm(y ~ z))
+  cor(res_x, res_y, method = method)
+}
+
+# assign variables
+radiomic_vars <- grep("^X7_", colnames(data), value = TRUE)
+biomarker_vars <- c("hscrp", "ldl", "tc", "hdl", "tg", "bmi")
+biomarker_labels <- c("hsCRP", "LDL", "Total Chol", "HDL", "Triglycerides", "BMI")
+names(biomarker_labels) <- biomarker_vars
+zvar <- "Mean_Result"
+
+# initialize the result list
+result_list <- list()
+
+# loop through two ways
+for (method in c("pearson", "spearman")) {
+  result <- expand.grid(Biomarker = biomarker_vars, Feature = radiomic_vars, stringsAsFactors = FALSE)
+  result$Correlation <- NA
+  result$N <- NA
+  
+  for (i in seq_len(nrow(result))) {
+    x <- as.numeric(data[[result$Feature[i]]])
+    y <- as.numeric(data[[result$Biomarker[i]]])
+    z <- as.numeric(data[[zvar]])
+    complete_idx <- complete.cases(x, y, z)
+    
+    if (sum(complete_idx) >= 3) {
+      result$Correlation[i] <- partial_corr(x[complete_idx], y[complete_idx], z[complete_idx], method = method)
+      result$N[i] <- sum(complete_idx)
+    }
+  }
+  
+  result$Biomarker <- biomarker_labels[result$Biomarker]  # substitute to clearer tags
+  result$Method <- method
+  result_list[[method]] <- result
+}
+
+# merge all results
+results_all <- do.call(rbind, result_list)
+
+# heatmap 
+plot_partial_heatmap <- function(df, method_title) {
+  ggplot(df, aes(x = Biomarker, y = Feature, fill = Correlation)) +
+    geom_tile(color = "white") +
+    scale_fill_gradient2(low = "blue", mid = "white", high = "red", 
+                         midpoint = 0, na.value = "grey90", limits = c(-1, 1)) +
+    theme_minimal(base_size = 12) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          axis.text.y = element_text(size = 9)) +
+    labs(title = method_title,
+         x = "Biomarker", y = "Radiomic Feature", fill = "Correlation")
+}
+
+# factors in order
+feature_levels <- unique(results_all$Feature)
+biomarker_levels <- unique(biomarker_labels)
+
+# Pearson firgure
+plot_data_pearson <- subset(results_all, Method == "pearson")
+plot_data_pearson$Biomarker <- factor(plot_data_pearson$Biomarker, levels = biomarker_levels)
+plot_data_pearson$Feature <- factor(plot_data_pearson$Feature, levels = feature_levels)
+
+p1 <- plot_partial_heatmap(plot_data_pearson, "Partial Correlation (Pearson, adjusted for Height)")
+
+# Spearman figure
+plot_data_spearman <- subset(results_all, Method == "spearman")
+plot_data_spearman$Biomarker <- factor(plot_data_spearman$Biomarker, levels = biomarker_levels)
+plot_data_spearman$Feature <- factor(plot_data_spearman$Feature, levels = feature_levels)
+
+p2 <- plot_partial_heatmap(plot_data_spearman, "Partial Correlation (Spearman, adjusted for Height)")
+
+# dispaly the plot
+print(p1)
+print(p2)
+
+
+ggsave("/data/circ_ukb/AHua/project/correlation_test/aortic_partial_correlation_heatmap_pearson.pdf", 
+       plot = p1, width = 8, height = 6)
+
+ggsave("/data/circ_ukb/AHua/project/correlation_test/aortic_partial_correlation_heatmap_spearman.pdf", 
+       plot = p2, width = 8, height = 6)
