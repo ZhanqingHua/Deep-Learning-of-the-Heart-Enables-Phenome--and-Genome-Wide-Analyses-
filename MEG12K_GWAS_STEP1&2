@@ -1,0 +1,95 @@
+#prune 
+/data/cath/users/Yang/software/plink2 \
+  --bfile /data/circ_ukb/AHua/MGB_array/MEG_12K/MEG_12K.hg38 \
+  --keep /data/circ_ukb/AHua/phenotype/MEG_12K/keep.aortic.txt\
+  --maf 0.01 \
+  --write-snplist \
+  --out snps_pass
+
+
+#step 1
+#!/bin/bash
+#SBATCH --job-name=regenie_step1
+#SBATCH --output=logs/regenie_%x_%j.out
+#SBATCH --error=logs/regenie_%x_%j.err
+#SBATCH --time=12:00:00
+#SBATCH --mem=16G
+#SBATCH --cpus-per-task=1
+#SBATCH --partition=normal
+
+# Load modules or activate environment
+cd /data/circ_ukb/AHua
+wdir=/data/circ_ukb/AHua/project/GWAS/regenie/height/step1/MEG_12K
+mkdir -p ${wdir}
+
+ARRAY=MEG_12K
+phenoCol=X48_SurfaceVolumeRatio
+bed=/data/circ_ukb/AHua/MGB_array/MEG_12K/MEG_12K.hg38
+
+# Activate conda environment
+export PATH=$HOME/.conda/envs/regenie_env/bin:$PATH
+
+# Run regenie
+regenie \
+    --step 1 \
+    --bed ${bed} \
+    --phenoFile /data/circ_ukb/AHua/phenotype/MEG_12K/${phenoCol}.tsv \
+    --phenoCol ${phenoCol} \
+    --qt --apply-rint \
+    --covarFile /data/circ_ukb/AHua/MGB_array/MEG_12K/MEG_12K.pca_covar_heart_clean.tsv \
+    --covarColList Age,batch,Gender,PC1,PC2,PC3,PC4,PC5,PC6,PC7,PC8,PC9,PC10,Height \
+    --out ${wdir}/height_${ARRAY}_${phenoCol} \
+    --bsize 1000 --force-step1 --lowmem \
+    --extract /data/circ_ukb/AHua/phenotype/MEG_12K/snps_pass.snplist
+
+
+#step 2
+
+#!/bin/bash
+#SBATCH --job-name=regenie
+#SBATCH --partition=bigmem
+#SBATCH --time=140:00:00
+#SBATCH --mem=40G
+#SBATCH --cpus-per-task=3
+#SBATCH --array=1-22
+#SBATCH --output=logs/regenie_%A_%a.out
+#SBATCH --error=logs/regenie_%A_%a.err
+
+export PATH=$HOME/.conda/envs/regenie_env/bin:$PATH
+
+wdir=/data/circ_ukb/AHua/project/GWAS/regenie/height/step2/MEG_12
+mkdir -p ${wdir}
+ARRAY=MEG_12K
+chr=${SLURM_ARRAY_TASK_ID:-22}
+
+# 2  feature in a loop 
+PHENOS=(X48_Flatness X48_MeshVolume)
+
+for phenoCol in "${PHENOS[@]}"; do
+  echo "Running REGENIE step 2 for ${phenoCol} on chr${chr}..."
+
+  regenie \
+    --step 2 \
+    --bgen /data/circ_ukb/AHua/imputated_MGBB/MEG12K/MEG_12K.nopha.chr${chr}.bgen \
+    --phenoFile /data/circ_ukb/AHua/phenotype/MEG_12K/${phenoCol}.tsv \
+    --phenoCol ${phenoCol} \
+    --qt --apply-rint \
+    --bsize 200 --force-step1 --lowmem \
+    --covarFile /data/circ_ukb/AHua/MGB_array/MEG_12K/MEG_12K.pca_covar_heart_clean.tsv \
+    --covarColList Age,batch,Gender,PC1,PC2,PC3,PC4,PC5,PC6,PC7,PC8,PC9,PC10,Height \
+    --maxCatLevels 10000 \
+    --pThresh 0.01 \
+    --maxstep-null 2 \
+    --pred /data/circ_ukb/AHua/project/GWAS/regenie/height/step1/MEG_12K/height_${ARRAY}_${phenoCol}_pred.list \
+    --out ${wdir}/height_${ARRAY}_${phenoCol}_chr${chr} \
+    --sample /data/circ_ukb/AHua/imputated_MGBB/MEG12K/MEG_12K.nopha.chr${chr}.sample
+done
+
+
+
+
+# bind 22 regenie results together
+  head -n 1 height_MEG_12K_1_X45_Sphericity.regenie > height_MEG_12K_X45_Sphericity.regenie.all.regenie
+for chr in {1..22}; do
+  tail -n +2 height_MEG_12K_${chr}_X45_Sphericity.regenie >> height_MEG_12K_X45_Sphericity_all.regenie
+done
