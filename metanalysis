@@ -1,0 +1,83 @@
+!/bin/bash
+#SBATCH --job-name=metanalysis
+#SBATCH --time=12:00:00
+#SBATCH --mem=64G
+#SBATCH --cpus-per-task=12
+#SBATCH --partition=normal
+
+
+module load gcc/9.3.0
+
+#!/bin/bash
+
+# set phenotype name 
+phenoCol="X46_MeshVolume_all"
+wdir="/data/circ_ukb/AHua/project/GWAS/regenie/metaanalysis"
+metal_bin="/data/circ_ukb/AHua/METAL/build/metal/metal"
+
+# input original
+input1="/data/circ_ukb/AHua/project/GWAS/regenie/step2/height_GSA_53K_${phenoCol}.regenie"
+input2="/data/circ_ukb/AHua/project/GWAS/regenie/step2/MEG_12/height_MEG_12K_${phenoCol}.regenie"
+
+# output prefix
+out_prefix="height_${phenoCol}_metal"
+
+# make menu
+mkdir -p "$wdir"
+cd "$wdir"
+
+
+for infile in "$input1" "$input2"; do
+  base=$(basename "$infile" .regenie)
+  awk -v OFS="\t" '
+    NR==1 {
+      for (i = 1; i <= NF; i++) header[i] = $i
+      line = header[1]
+      for (i = 2; i <= NF; i++) line = line OFS header[i]
+      print line, "PVAL"
+      next
+    }
+    {
+      logp = $(NF)
+      pval = (logp ~ /^[0-9.]+$/) ? 10^(-logp) : "NA"
+      line = $1
+      for (i = 2; i <= NF; i++) line = line OFS $i
+      print line, pval
+    }
+  ' "$infile" > "${base}_withP.regenie"
+done
+
+
+
+
+
+#  METAL analysis
+$metal_bin <<EOF
+SCHEME STDERR
+CUSTOMVARIABLE TotalSampleSize
+LABEL TotalSampleSize as N
+USESTRAND OFF
+GENOMICCONTROL ON
+AVERAGEFREQ ON
+MINMAXFREQ ON
+COLUMNCOUNTING STRICT
+SEPARATOR TAB
+
+MARKER ID
+ALLELE ALLELE0 ALLELE1
+FREQ A1FREQ
+EFFECT BETA
+STDERR SE
+PVALUE PVAL
+WEIGHT N
+
+OUTFILE ${out_prefix} .txt
+
+PROCESSFILE height_GSA_53K_${phenoCol}_withP.regenie
+PROCESSFILE height_MEG_12K_${phenoCol}_withP.regenie
+
+ANALYZE HETEROGENEITY
+CLEAR
+QUIT
+EOF
+
