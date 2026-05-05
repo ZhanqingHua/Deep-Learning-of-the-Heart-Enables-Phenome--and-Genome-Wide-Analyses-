@@ -1,4 +1,4 @@
-# GWAS for GSA-53K
+# Prune for GSA-53K
 #prune 
 /data/cath/users/Yang/software/plink2 \
   --bfile /data/circ_ukb/AHua/MGB_array/GSA_53k/GSA_53K.hg38 \
@@ -8,4 +8,11 @@
   --out snps_pass
   
 
-
+# Prune for MEG-12k
+#prune 
+/data/cath/users/Yang/software/plink2 \
+  --bfile /data/circ_ukb/AHua/MGB_array/MEG_12K/MEG_12K.hg38 \
+  --keep /data/circ_ukb/AHua/phenotype/MEG_12K/keep.aortic.txt\
+  --maf 0.01 \
+  --write-snplist \
+  --out snps_pass
