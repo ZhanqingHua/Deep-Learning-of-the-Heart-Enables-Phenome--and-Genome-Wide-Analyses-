@@ -1,1 +1,11 @@
+# GWAS for GSA-53K
+#prune 
+/data/cath/users/Yang/software/plink2 \
+  --bfile /data/circ_ukb/AHua/MGB_array/GSA_53k/GSA_53K.hg38 \
+  --keep /data/circ_ukb/AHua/MGB_array/GSA_53k/keep_IDs.txt \
+  --maf 0.01 \
+  --write-snplist \
+  --out snps_pass
+  
+
 
