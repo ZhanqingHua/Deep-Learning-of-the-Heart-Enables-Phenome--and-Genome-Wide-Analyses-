@@ -17,10 +17,6 @@ merged <- merge(df1, df2, by = "EMPI", all.x = TRUE)
 fwrite(merged, "/data/circ_ukb/AHua/project/correlation_test/heart_Height_merged.tsv ")
 
 
-
-
-
-
 data <- read.csv("/data/circ_ukb/AHua/project/correlation_test/aortic_Height_merged.tsv", check.names = FALSE)
 
 library(ggplot2)
@@ -94,20 +90,12 @@ plot_data_pearson$Feature <- factor(plot_data_pearson$Feature, levels = feature_
 
 p1 <- plot_partial_heatmap(plot_data_pearson, "Partial Correlation (Pearson, adjusted for Height)")
 
-# Spearman figure
-plot_data_spearman <- subset(results_all, Method == "spearman")
-plot_data_spearman$Biomarker <- factor(plot_data_spearman$Biomarker, levels = biomarker_levels)
-plot_data_spearman$Feature <- factor(plot_data_spearman$Feature, levels = feature_levels)
 
-p2 <- plot_partial_heatmap(plot_data_spearman, "Partial Correlation (Spearman, adjusted for Height)")
 
 # dispaly the plot
 print(p1)
-print(p2)
+
 
 
 ggsave("/data/circ_ukb/AHua/project/correlation_test/aortic_partial_correlation_heatmap_pearson.pdf", 
        plot = p1, width = 8, height = 6)
-
-ggsave("/data/circ_ukb/AHua/project/correlation_test/aortic_partial_correlation_heatmap_spearman.pdf", 
-       plot = p2, width = 8, height = 6)
