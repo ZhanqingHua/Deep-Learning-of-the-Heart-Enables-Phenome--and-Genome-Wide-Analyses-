@@ -1,0 +1,122 @@
+---
+title: "MGBB CT FULL COHORT data clean"
+output: html_document
+date: "2025-03-05"
+---
+```{r}
+df<-read.csv("~/Desktop/Harvard_University_MSc./MGH/phenotype/MGBB_CT_Full_Cohort_03032025.csv")
+biobank_df<-read.csv("~/Desktop/Harvard_University_MSc./MGH/phenotype/matched_linker_with_full.csv")
+head(df)
+library(dplyr)
+```
+
+Remove all later scans for the same patient 
+```{r}
+df_clean <- df %>%
+  group_by(EMPI) %>%
+  filter(Image_Date_Numeric == min(Image_Date_Numeric)) %>% 
+  summarise(across(everything(), ~ if(is.numeric(.)) mean(., na.rm = TRUE) else first(.))) %>%
+  ungroup()
+
+#To test getting the correct cleaned dataset
+# multiple_entries <- df %>%
+#   group_by(EMPI) %>%
+#   filter(Image_Date_Numeric == min(Image_Date_Numeric)) %>%
+#   summarise(count = n()) %>%
+#   filter(count > 1) %>%
+#   pull(EMPI) # Extract EMPI values
+
+# # get the list of EMPI with multiple earliest entries
+# print(multiple_entries) 
+
+# # extract EMPI 100560849
+# empi_100560849_rows_check <- df_clean %>%
+#   filter(EMPI == 100560849)
+
+# # extracted rows
+# print(empi_100560849_rows_clean)
+
+```
+
+
+Match biobank ID with EMPI using 
+
+```{r}
+#match
+df_clean$Biobank_Subject_ID <- biobank_df$IID_full[match(df_clean$EMPI, biobank_df$EMPI)]
+#rename
+colnames(df_clean)[colnames(df_clean) == "Biobank_Subject_ID"] <- "IID"
+# Add a new column 'FID' and fill all rows with 0
+df_clean$FID <- 0
+df_clean <- df_clean[, c("FID", "IID", setdiff(names(df_clean), c("FID", "IID")))]
+
+
+head(df_clean)
+
+
+
+
+
+
+
+
+```
+
+Looking for heart phenotypes
+remove rows where the Prevalent_Heart_Surgery column & Heart failure  has a value of 1
+```{r}
+
+df_heart_phenotype <- df_clean %>% 
+  filter(Prevalent_Heart_Surgery != 1)%>%
+  filter(Prevalent_Heart_Failure != 1)
+sum(df$Prevalent_Heart_Failure == 1, na.rm = TRUE)
+
+
+```
+
+Looking for aortic phenotypes
+remove rows where the Prevalent_Aortic_Surgery = 1
+```{r}
+df_aortic_phenotype <- df_clean %>% 
+  filter(Prevalent_Aortic_Surgery != 1)
+
+```
+
+save csv
+```{r}
+
+write.csv(df_heart_phenotype, "~/Desktop/Harvard_University_MSc./MGH/df_heart_phenotype_MEG12K.csv", row.names = FALSE)
+write.csv(df_aortic_phenotype, "~/Desktop/Harvard_University_MSc./MGH/df_aortic_phenotype_MEG12K.csv", row.names = FALSE)
+
+```
+
+convert to tsv
+
+```{r}
+df_1 <- read.csv("~/Desktop/Harvard_University_MSc./MGH/df_heart_phenotype_MEG12K.csv")
+write.table(df_1, "~/Desktop/Harvard_University_MSc./MGH/df_heart_phenotype_MEG12K.tsv", sep = "\t", row.names = FALSE, quote = FALSE)
+
+df_2 <- read.csv("~/Desktop/Harvard_University_MSc./MGH/df_aortic_phenotype_MEG12K.csv")
+write.table(df_2, "~/Desktop/Harvard_University_MSc./MGH/df_aortic_phenotype_MEG12K.tsv", sep = "\t", row.names = FALSE, quote = FALSE)
+
+
+```
+
+```{r}
+df<-read.csv("~/Desktop/Harvard_University_MSc./MGH/phenotype/df_heart_phenotype.csv")
+colnames(df)
+
+mean_age <- mean(df_clean$Age, na.rm = TRUE)
+sd_age <- sd(df_clean$Age, na.rm = TRUE)
+
+
+female_percent <- mean(df_clean$Gender_Legal_Sex == "Female", na.rm = TRUE) * 100
+
+
+cat(sprintf("Mean [SD] age: %.1f [%.1f] years; %.1f%% female\n", mean_age, sd_age, female_percent))
+
+```
+
+
+
+
