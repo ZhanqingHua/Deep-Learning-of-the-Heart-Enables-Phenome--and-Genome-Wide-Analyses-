@@ -6,7 +6,7 @@ This script performs statistical fine-mapping using SuSiE (`susieR`) on GWAS sum
 
 The pipeline:
 1. Loads GWAS summary statistics
-2. Extracts SNPs within ±100 kb of a target locus
+2. Extracts SNPs within ±500 kb of a target locus
 3. Matches SNPs with genotype BIM files
 4. Computes LD matrices using PLINK
 5. Runs SuSiE fine-mapping using summary statistics and LD information
