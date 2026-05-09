@@ -1,6 +1,6 @@
 # MGBB CT Full Cohort Data Cleaning
 
-## Overview
+## Overview 
 
 This R Markdown script cleans the MGBB CT full cohort phenotype dataset and prepares heart and aortic phenotype files for downstream GWAS analysis.
 
