@@ -1,0 +1,165 @@
+library(data.table)
+library(ggplot2)
+library(ggrepel)
+library(GenomicRanges)
+library(rtracklayer)
+library(Cairo)
+
+options(bitmapType = "cairo")  # prevent X11 errors in headless environments
+
+# Step 1. Set file path and GWAS input files 
+path <- "/data/circ_ukb/AHua/project/GWAS/regenie/height/metaanalysis/"
+
+files <- c(
+  "height_X46_Maximum2DDiameterSlice_all_metal1.txt",
+  "height_X46_Maximum3DDiameter_all_metal1.txt",
+  "height_X46_MeshVolume_all_metal1.txt",
+  "height_X46_MinorAxisLength_all_metal1.txt",
+  "height_X46_Sphericity_all_metal1.txt"
+)
+
+#  Step 2. Define helper functions 
+read_gwas <- function(file, feature_name) {
+  cat("Reading:", file, "\n")
+  dat <- fread(paste0(path, file), select = c(1, 10))
+  setnames(dat, c("Marker", "P"))
+  parts <- tstrsplit(dat$Marker, ":", fixed = TRUE)
+  dat[, CHR := as.numeric(sub("chr", "", parts[[1]]))]
+  dat[, BP := as.numeric(parts[[2]])]
+  dat[, Feature := feature_name]
+  dat <- dat[!is.na(CHR) & !is.na(BP) & !is.na(P)]
+  cat("Loaded", nrow(dat), "rows for", feature_name, "\n")
+  return(dat)
+}
+
+filter_and_sample <- function(dat, p_threshold = 5e-8, frac = 0.03) {
+  sig <- dat[P <= p_threshold]
+  nonsig <- dat[P > p_threshold, .SD[sample(.N, max(1, round(.N * frac)))], by = CHR]
+  combined <- rbind(sig, nonsig)
+  cat("  ├──", nrow(sig), "significant +", nrow(nonsig), "sampled non-significant SNPs\n")
+  return(combined)
+}
+
+# Step 3. Read and combine all features 
+Maximum2DDiameterSlice <- filter_and_sample(read_gwas(files[1], "Maximum2DDiameterSlice"))
+Maximum3DDiameter      <- filter_and_sample(read_gwas(files[2], "Maximum3DDiameter"))
+MeshVolume             <- filter_and_sample(read_gwas(files[3], "MeshVolume"))
+MinorAxisLength        <- filter_and_sample(read_gwas(files[4], "MinorAxisLength"))
+Sphericity             <- filter_and_sample(read_gwas(files[5], "Sphericity"))
+
+gwas_combined <- rbindlist(list(
+  Maximum2DDiameterSlice, Maximum3DDiameter, MeshVolume, MinorAxisLength, Sphericity
+), fill = TRUE)
+
+setnames(gwas_combined, "Marker", "SNP", skip_absent = TRUE)
+
+gwas_combined <- gwas_combined[
+  !is.na(CHR) & CHR >= 1 & CHR <= 22 & !is.na(BP) & !is.na(P)
+][order(CHR, BP)]
+
+cat(" Combined", nrow(gwas_combined), "variants across 5 radiomic features\n")
+
+# Step 4. Identify significant SNPs 
+sig_snps <- gwas_combined[P < 5e-8]
+cat("Found", nrow(sig_snps), "significant SNPs genome-wide\n")
+
+#  Step 5. Annotate nearest genes using Gencode GTF 
+cat(" Searching for Gencode annotation file...\n")
+
+gtf_candidates <- c(
+  "/data/circ_ukb/AHua/reference/gencode.v46.annotation.gtf",
+  "/data/circ_ukb/AHua/reference/gencode.v46.annotation.gtf.gz",
+  "/data/circ_ukb/AHua/project/GWAS/regenie/height/metaanalysis/gencode.v46.annotation.gtf",
+  "/data/circ_ukb/AHua/project/GWAS/regenie/height/metaanalysis/gencode.v46.annotation.gtf.gz"
+)
+
+gtf_path <- gtf_candidates[file.exists(gtf_candidates)][1]
+
+if (!is.na(gtf_path)) {
+  cat(" Found GTF file:", gtf_path, "\n")
+  gtf <- import(gtf_path)
+  genes <- gtf[gtf$type == "gene"]
+  cat(" Imported", length(genes), "gene entries\n")
+  
+  gene_ranges <- GRanges(
+    seqnames = seqnames(genes),
+    ranges = IRanges(start = start(genes), end = end(genes)),
+    gene_name = mcols(genes)$gene_name
+  )
+  
+  snp_ranges <- GRanges(
+    seqnames = paste0("chr", sig_snps$CHR),
+    ranges = IRanges(start = sig_snps$BP, end = sig_snps$BP)
+  )
+  
+  nearest_idx <- nearest(snp_ranges, gene_ranges)
+  sig_snps[, nearest_gene := mcols(gene_ranges)$gene_name[nearest_idx]]
+  
+  sig_snps_df <- sig_snps[, .(SNP, CHR, BP, P, nearest_gene)]
+  cat(" Annotated", sum(!is.na(sig_snps_df$nearest_gene)), "SNPs with nearest genes\n")
+  
+} else {
+  cat(" No Gencode GTF file found, skipping annotation.\n")
+  sig_snps_df <- sig_snps[, .(SNP, CHR, BP, P)]
+  sig_snps_df[, nearest_gene := NA_character_]
+}
+
+# Step 6. Select top 20 SNPs for labeling 
+setorder(sig_snps_df, P)
+top_snps <- sig_snps_df[1:20]
+
+# Step 7. Compute cumulative chromosome positions
+gwas_combined[, logP := -log10(P)]
+chr_info <- gwas_combined[, .(chr_len = max(BP)), by = CHR]
+chr_info[, tot := cumsum(chr_len) - chr_len]
+
+gwas_combined <- merge(gwas_combined, chr_info, by = "CHR")
+gwas_combined[, BPcum := BP + tot]
+chr_info[, center := tot + chr_len / 2]
+
+# Step 8. Plot Manhattan 
+p <- ggplot(gwas_combined, aes(x = BPcum, y = logP, color = factor(CHR))) +
+  geom_point(alpha = 0.75, size = 0.7) +
+  scale_color_manual(values = rep(c("gray30", "gray60"), 22)) +
+  scale_x_continuous(label = chr_info$CHR, breaks = chr_info$center) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, max(gwas_combined$logP) + 1)) +
+  geom_hline(yintercept = -log10(5e-8), color = "red", linetype = "dashed", linewidth = 0.6) +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(size = 9, vjust = 0.5),
+    axis.title = element_text(size = 13)
+  ) +
+  labs(
+    title = "Combined Manhattan Plot with Gene Labels (height_X46)",
+    x = "Chromosome",
+    y = expression(-log[10](P))
+  )
+
+# Step 9. Add gene labels 
+top_snps <- merge(top_snps, chr_info, by = "CHR", all.x = TRUE)
+top_snps[, BPcum := BP + tot]
+
+p <- p + geom_text_repel(
+  data = top_snps,
+  aes(x = BPcum, y = -log10(P), label = nearest_gene),
+  size = 3.2,
+  color = "black",
+  box.padding = 0.6,
+  point.padding = 0.3,
+  max.overlaps = 30,
+  segment.color = "gray40"
+)
+
+#  Step 10. Save plot 
+CairoPNG("Manhattan_X46_labeled.png", width = 13, height = 6, units = "in", res = 300)
+print(p)
+dev.off()
+
+CairoPDF("Manhattan_X46_labeled.pdf", width = 13, height = 6)
+print(p)
+dev.off()
+
+cat("Saved labeled Manhattan plot: Manhattan_X46_labeled.png / .pdf\n")
