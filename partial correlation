@@ -66,6 +66,7 @@ for (method in c("pearson", "spearman")) {
 # merge all results
 results_all <- do.call(rbind, result_list)
 
+#choose to report pearson only
 # heatmap 
 plot_partial_heatmap <- function(df, method_title) {
   ggplot(df, aes(x = Biomarker, y = Feature, fill = Correlation)) +
