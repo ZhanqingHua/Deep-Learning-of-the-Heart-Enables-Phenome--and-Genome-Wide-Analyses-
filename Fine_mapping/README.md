@@ -1,6 +1,6 @@
 # Fine Mapping Pipeline
 
-## Overview
+## Overview 
 
 This script performs statistical fine-mapping using SuSiE (`susieR`) on GWAS summary statistics within a target genomic region.
 
