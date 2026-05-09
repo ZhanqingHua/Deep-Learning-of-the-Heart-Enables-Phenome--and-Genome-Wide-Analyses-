@@ -1,4 +1,4 @@
-# Figures & Tables
+# Figures & Tables 
 
 This folder contains scripts and outputs used to generate the figures and tables for the manuscript
 
