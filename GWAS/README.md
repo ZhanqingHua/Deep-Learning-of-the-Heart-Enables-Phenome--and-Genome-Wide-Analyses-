@@ -1,6 +1,6 @@
 # GWAS Pipeline
 
-## Overview
+## Overview 
 
 This folder contains scripts used for genome-wide association studies (GWAS), meta-analysis, SNP pruning, and downstream preprocessing for functional annotation.
 
