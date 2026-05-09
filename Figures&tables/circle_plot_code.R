@@ -214,7 +214,7 @@ cat("Merged features:", ncol(overall_df)-3, "\n")
 # CAD GWAS
 cad <- fread(cad_file, header=TRUE)
 
-# 构造 CAD 子表
+# CAD construction
 cad_sub <- cad[, .(
   SNP = ID,
   Chromosome = as.integer(chr),
