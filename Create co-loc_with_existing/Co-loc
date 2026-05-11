@@ -1,0 +1,243 @@
+# Set working directory
+cd /data/circ_ukb/AHua/project/GWAS/regenie/height/metaanalysis
+# Set categorical GWAS file path:
+CAT_GWAS="/data/circ_ukb/AHua/project/GWAS/regenie/comparegwas/categorical-20002-1075_parsed_mainchr.txt"
+#Create lead SNP → feature mapping file
+cat > lead_snp_feature_list.csv <<'EOF'
+chr1:150663039:A:G,left_ventricle,Maximum2DDiameterSlice
+chr1:150663039:A:G,right_ventricle,LeastAxisLength
+chr1:150663039:A:G,right_ventricle,SurfaceVolumeRatio
+chr1:188363771:G:A,left_ventricle,Sphericity
+chr11:21638366:T:A,right_ventricle,Maximum3DDiameter
+chr11:21638366:T:A,right_ventricle,VoxelVolume
+chr11:63153813:T:C,left_atrium,Elongation
+chr12:103896202:G:A,left_ventricle,Maximum2DDiameterSlice
+chr12:119171345:G:A,left_ventricle,Sphericity
+chr12:13341626:C:T,left_ventricle,MeshVolume
+chr12:13341626:C:T,left_ventricle,MinorAxisLength
+chr12:13341626:C:T,right_atrium,Maximum2DDiameterColumn
+chr12:13341626:C:T,right_atrium,SurfaceArea
+chr12:13341626:C:T,right_atrium,SurfaceVolumeRatio
+chr12:13341626:C:T,right_atrium,MeshVolume
+chr12:13341626:C:T,right_ventricle,MeshVolume
+chr12:13341626:C:T,right_ventricle,VoxelVolume
+chr12:13341626:C:T,right_ventricle,Flatness
+chr13:70838724:C:T,left_ventricle,Maximum2DDiameterSlice
+chr14:35292469:C:G,left_ventricle,Sphericity
+chr14:57737493:C:G,aorta,LeastAxisLength
+chr14:73115058:T:C,left_ventricle,Maximum2DDiameterSlice
+chr14:73528032:G:A,left_ventricle,Maximum2DDiameterSlice
+chr18:39816145:T:C,right_atrium,SurfaceVolumeRatio
+chr19:37994366:G:A,left_ventricle,Maximum2DDiameterSlice
+chr19:56602254:A:G,left_ventricle,MeshVolume
+chr19:56602254:A:G,right_ventricle,MeshVolume
+chr19:56602254:A:G,right_ventricle,VoxelVolume
+chr2:131537588:T:C,aorta,Maximum2DDiameterSlice
+chr2:183147965:T:G,right_ventricle,LeastAxisLength
+chr2:23386904:C:T,left_ventricle,MeshVolume
+chr21:34549790:C:T,right_atrium,SurfaceVolumeRatio
+chr22:26534948:G:C,left_ventricle,MeshVolume
+chr22:49838346:C:T,right_ventricle,Maximum3DDiameter
+chr4:121649374:G:A,right_ventricle,Maximum3DDiameter
+chr4:17449946:G:A,right_ventricle,LeastAxisLength
+chr4:17449946:G:A,right_ventricle,VoxelVolume
+chr4:3964828:G:A,aorta,LeastAxisLength
+chr5:111567801:G:T,aorta,Maximum2DDiameterSlice
+chr5:145280823:T:G,right_ventricle,LeastAxisLength
+chr6:18383029:A:G,left_ventricle,MeshVolume
+chr6:18383029:A:G,left_ventricle,MinorAxisLength
+chr6:18383029:A:G,right_ventricle,MeshVolume
+chr6:18383029:A:G,right_ventricle,SurfaceVolumeRatio
+chr6:18383029:A:G,right_ventricle,VoxelVolume
+chr6:87756128:T:C,left_ventricle,MeshVolume
+chr7:37531495:A:G,left_atrium,Elongation
+chr7:74056384:G:A,aorta,SurfaceVolumeRatio
+EOF
+
+# Extract exact overlapping SNP rows from radiomic GWAS
+echo -e "QUERY_SNP\tCHAMBER\tFEATURE\tFILE\tMarkerName\tAllele1\tAllele2\tFreq1\tFreqSE\tMinFreq\tMaxFreq\tEffect\tStdErr\tP_value\tDirection\tHetISq\tHetChiSq\tHetDf\tHetPVal\tTotalSampleSize" > extracted_overlap_snps.tsv
+
+while IFS=',' read -r snp chamber feature
+do
+    case "$chamber" in
+        left_atrium) code="X45" ;;
+        left_ventricle) code="X46" ;;
+        right_atrium) code="X47" ;;
+        right_ventricle) code="X48" ;;
+        aorta) code="X7" ;;
+    esac
+
+    file="height_${code}_${feature}_all_metal1.txt"
+
+    awk -v s="$snp" \
+        -v c="$chamber" \
+        -v f="$feature" \
+        -v fi="$file" \
+    'BEGIN{FS=OFS="\t"}
+    NR>1 && $1==s{
+        print s,c,f,fi,$0
+    }' "$file" >> extracted_overlap_snps.tsv
+
+done < lead_snp_feature_list.csv
+
+# Create ±500 kb locus definition file
+awk 'BEGIN{FS=OFS="\t"}
+NR==1{next}
+{
+split($1,a,":")
+chr=a[1]
+pos=a[2]
+gsub(/^chr/,"",chr)
+
+print $1,$2,$3,$4,chr,pos,pos-500000,pos+500000
+}' extracted_overlap_snps.tsv > lead_locus_info.tsv
+
+#Extract radiomic whole loci (±500 kb)
+echo -e "QUERY_SNP\tCHAMBER\tFEATURE\tFILE\tMarkerName\tAllele1\tAllele2\tFreq1\tFreqSE\tMinFreq\tMaxFreq\tEffect\tStdErr\tP_value\tDirection\tHetISq\tHetChiSq\tHetDf\tHetPVal\tTotalSampleSize" > radiomic_loci_500kb.tsv
+
+while IFS=$'\t' read -r query_snp chamber feature file chr pos start end
+do
+    echo "Processing radiomic: $query_snp $feature"
+
+    awk -v qs="$query_snp" \
+        -v chamber="$chamber" \
+        -v feature="$feature" \
+        -v file="$file" \
+        -v chr="$chr" \
+        -v start="$start" \
+        -v end="$end" \
+    'BEGIN{FS=OFS="\t"}
+    NR==1{next}
+    {
+        s=$1
+        sub(/^chr/,"",s)
+        split(s,a,":")
+
+        if(a[1]==chr && a[2]>=start && a[2]<=end){
+            print qs,chamber,feature,file,$0
+        }
+    }' "$file" >> radiomic_loci_500kb.tsv
+
+done < lead_locus_info.tsv
+
+#Extract categorical GWAS whole loci (±500 kb)
+echo -e "QUERY_SNP\tCHAMBER\tFEATURE\tCAT_CHR\tCAT_POS\tCAT_ID\tREF\tALT\tAF_cases\tAF_controls\tBETA\tPVAL\tSE" > categorical_loci_500kb.tsv
+
+while IFS=$'\t' read -r query_snp chamber feature file chr pos start end
+do
+    echo "Processing categorical: $query_snp $feature"
+
+    awk -v qs="$query_snp" \
+        -v chamber="$chamber" \
+        -v feature="$feature" \
+        -v chr="$chr" \
+        -v start="$start" \
+        -v end="$end" \
+    'BEGIN{FS=OFS="\t"}
+    NR==1{next}
+    {
+        c=$1
+        sub(/^chr/,"",c)
+
+        if(c==chr && $2>=start && $2<=end){
+            print qs,chamber,feature,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10
+        }
+    }' "$CAT_GWAS" >> categorical_loci_500kb.tsv
+
+done < lead_locus_info.tsv
+
+# co-loc
+cat > run_coloc_from_loci_chrpos.R <<'EOF'
+library(data.table)
+library(coloc)
+
+rad <- fread("/data/circ_ukb/AHua/project/GWAS/regenie/height/metaanalysis/radiomic_loci_500kb.tsv")
+cat <- fread("categorical_loci_500kb.tsv")
+
+rad[, chrpos := sub("^chr", "", sub(":([^:]+):([^:]+)$", "", MarkerName))]
+cat[, chrpos := paste0(sub("^chr", "", CAT_CHR), ":", CAT_POS)]
+
+rad[, Effect := as.numeric(Effect)]
+rad[, StdErr := as.numeric(StdErr)]
+rad[, Freq1 := as.numeric(Freq1)]
+rad[, TotalSampleSize := as.numeric(TotalSampleSize)]
+
+cat[, BETA := as.numeric(BETA)]
+cat[, SE := as.numeric(SE)]
+cat[, AF_controls := as.numeric(AF_controls)]
+
+rad <- rad[!is.na(Effect) & !is.na(StdErr) & !is.na(Freq1)]
+cat <- cat[!is.na(BETA) & !is.na(SE) & !is.na(AF_controls)]
+
+keys <- unique(rad[, .(QUERY_SNP, CHAMBER, FEATURE)])
+
+res_list <- list()
+
+for(i in seq_len(nrow(keys))) {
+  
+  qs <- keys$QUERY_SNP[i]
+  ch <- keys$CHAMBER[i]
+  ft <- keys$FEATURE[i]
+  
+  r <- rad[QUERY_SNP == qs & CHAMBER == ch & FEATURE == ft]
+  d <- cat[QUERY_SNP == qs & CHAMBER == ch & FEATURE == ft]
+  
+  m <- merge(
+    r[, .(chrpos, MarkerName, Allele1, Allele2, beta1=Effect, se1=StdErr, maf1=Freq1, N1=TotalSampleSize)],
+    d[, .(chrpos, CAT_ID, REF, ALT, beta2=BETA, se2=SE, maf2=AF_controls)],
+    by="chrpos"
+  )
+  
+  m <- unique(m, by="chrpos")
+  
+  if(nrow(m) < 50) {
+    res_list[[length(res_list)+1]] <- data.table(
+      QUERY_SNP=qs, CHAMBER=ch, FEATURE=ft,
+      nsnps=nrow(m),
+      PP.H0=NA, PP.H1=NA, PP.H2=NA, PP.H3=NA, PP.H4=NA,
+      note="too few overlapping chrpos SNPs"
+    )
+    next
+  }
+  
+  dataset1 <- list(
+    beta = m$beta1,
+    varbeta = m$se1^2,
+    snp = m$chrpos,
+    MAF = m$maf1,
+    N = unique(na.omit(m$N1))[1],
+    type = "quant"
+  )
+  
+  dataset2 <- list(
+    beta = m$beta2,
+    varbeta = m$se2^2,
+    snp = m$chrpos,
+    MAF = m$maf2,
+    N = 8334,
+    type = "cc",
+    s = 0.5
+  )
+  
+  co <- coloc.abf(dataset1, dataset2)
+  
+  res_list[[length(res_list)+1]] <- data.table(
+    QUERY_SNP=qs,
+    CHAMBER=ch,
+    FEATURE=ft,
+    nsnps=nrow(m),
+    PP.H0=co$summary["PP.H0.abf"],
+    PP.H1=co$summary["PP.H1.abf"],
+    PP.H2=co$summary["PP.H2.abf"],
+    PP.H3=co$summary["PP.H3.abf"],
+    PP.H4=co$summary["PP.H4.abf"],
+    note="OK"
+  )
+}
+
+res <- rbindlist(res_list, fill=TRUE)
+fwrite(res, "coloc_results_500kb_chrpos.tsv", sep="\t")
+print(res)
+EOF
+
+Rscript run_coloc_from_loci_chrpos.R
